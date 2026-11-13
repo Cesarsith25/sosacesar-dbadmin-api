@@ -1,0 +1,155 @@
+// =====================================================
+// LogiExpress
+// =====================================================
+
+Enum estado_cliente {
+  ACTIVO
+  INACTIVO
+}
+
+Enum tipo_direccion {
+  ORIGEN
+  DESTINO
+}
+
+Enum estado_envio {
+  REGISTRADO
+  EN_TRANSITO
+  ENTREGADO
+  CANCELADO
+}
+
+Enum estado_evento {
+  REGISTRADO
+  RECOLECTADO
+  EN_TRANSITO
+  EN_ALMACEN
+  EN_REPARTO
+  ENTREGADO
+  INCIDENCIA
+}
+
+// -----------------------------------------------------
+// Tabla 1: Clientes (remitentes y destinatarios)
+// -----------------------------------------------------
+Table clientes {
+  cliente_id int [pk, increment]
+  nombre varchar(100) [not null]
+  email varchar(100) [not null, unique]
+  telefono varchar(20) [null]
+  estado estado_cliente [not null, default: 'ACTIVO']
+  limite_credito decimal(10,2) [not null, default: 0.00, note: 'CHECK (limite_credito >= 0)']
+  fecha_registro datetime [not null, default: `CURRENT_TIMESTAMP`]
+}
+
+// -----------------------------------------------------
+// Tabla 2: Direcciones de origen y destino del cliente
+// -----------------------------------------------------
+Table direcciones {
+  direccion_id int [pk, increment]
+  cliente_id int [not null]
+  tipo tipo_direccion [not null]
+  calle varchar(150) [not null]
+  numero varchar(10) [null]
+  colonia varchar(100) [null]
+  ciudad varchar(80) [not null]
+  entidad_federativa varchar(80) [not null]
+  codigo_postal varchar(10) [not null]
+}
+
+// -----------------------------------------------------
+// Tabla 3: Almacenes (centros de distribución)
+// -----------------------------------------------------
+Table almacenes {
+  almacen_id int [pk, increment]
+  nombre varchar(100) [not null, unique]
+  ubicacion varchar(150) [not null]
+  capacidad_maxima int [not null, note: 'CHECK (capacidad_maxima > 0)']
+
+  Note: 'El trigger before_insert_paquete_almacen valida capacidad_maxima contra los paquetes de envíos activos'
+}
+
+// -----------------------------------------------------
+// Tabla 4: Envíos (encabezado del envío)
+// -----------------------------------------------------
+Table envios {
+  envio_id int [pk, increment]
+  remitente_id int [not null]
+  destinatario_id int [not null]
+  direccion_origen_id int [not null]
+  direccion_destino_id int [not null]
+  costo_total decimal(10,2) [not null, default: 0.00, note: 'CHECK (costo_total >= 0)']
+  fecha_registro datetime [not null, default: `CURRENT_TIMESTAMP`]
+  fecha_entrega datetime [null]
+  estado estado_envio [not null, default: 'REGISTRADO']
+
+  indexes {
+    estado [name: 'idx_envios_estado']
+    (remitente_id, fecha_registro) [name: 'idx_envios_remitente_fecha']
+  }
+
+  Note: 'estado y fecha_entrega los actualiza el trigger after_insert_historial_rastreo'
+}
+
+// -----------------------------------------------------
+// Tabla 5: Paquetes contenidos en un envío
+// -----------------------------------------------------
+Table paquetes {
+  paquete_id int [pk, increment]
+  envio_id int [not null]
+  almacen_id int [null, note: 'NULL mientras el paquete no se asigna a un almacén']
+  peso_kg decimal(8,2) [not null, note: 'CHECK (peso_kg > 0)']
+  largo_cm decimal(6,2) [not null, note: 'CHECK (largo_cm > 0)']
+  ancho_cm decimal(6,2) [not null, note: 'CHECK (ancho_cm > 0)']
+  alto_cm decimal(6,2) [not null, note: 'CHECK (alto_cm > 0)']
+  contenido varchar(200) [not null]
+}
+
+// -----------------------------------------------------
+// Tabla 6: Historial de rastreo (bitácora de seguimiento)
+// -----------------------------------------------------
+Table historial_rastreo {
+  rastreo_id int [pk, increment]
+  envio_id int [not null]
+  fecha datetime [not null, default: `CURRENT_TIMESTAMP`]
+  ubicacion_actual varchar(150) [not null]
+  estado_evento estado_evento [not null]
+  observaciones varchar(255) [null]
+
+  indexes {
+    (envio_id, fecha) [name: 'idx_rastreo_envio_fecha']
+  }
+
+  Note: 'Un INSERT con estado_evento = ENTREGADO dispara after_insert_historial_rastreo'
+}
+
+// -----------------------------------------------------
+// Tabla 7: Auditoría de cambios de costo
+// -----------------------------------------------------
+Table auditoria_envios {
+  auditoria_id int [pk, increment]
+  envio_id int [not null]
+  costo_anterior decimal(10,2) [not null]
+  costo_nuevo decimal(10,2) [not null]
+  usuario varchar(100) [not null]
+  fecha_modificacion datetime [not null, default: `CURRENT_TIMESTAMP`]
+
+  Note: 'La llena únicamente el trigger after_update_envio_costo; la API nunca inserta aquí'
+}
+
+// -----------------------------------------------------
+// Relaciones
+// -----------------------------------------------------
+Ref: direcciones.cliente_id > clientes.cliente_id [delete: cascade]
+
+Ref: envios.remitente_id > clientes.cliente_id
+Ref: envios.destinatario_id > clientes.cliente_id
+Ref: envios.direccion_origen_id > direcciones.direccion_id
+Ref: envios.direccion_destino_id > direcciones.direccion_id
+
+Ref: paquetes.envio_id > envios.envio_id [delete: cascade]
+Ref: paquetes.almacen_id > almacenes.almacen_id [delete: set null]
+
+Ref: historial_rastreo.envio_id > envios.envio_id [delete: cascade]
+
+Ref: auditoria_envios.envio_id > envios.envio_id [delete: cascade]
